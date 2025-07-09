@@ -1,160 +1,144 @@
-# Acne Severity Predictor (Regression Version)
+# --- Health Condition Predictor App ---
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pickle
-import requests
-import os
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
+import os
+from fpdf import FPDF
+import requests
 
-st.set_page_config(page_title="Acne Severity Predictor", layout="centered")
+# --- Set up Streamlit page ---
+st.set_page_config(page_title="🩺 Health Condition Predictor", layout="wide")
 
-@st.cache_data
-def fetch_real_data():
-    np.random.seed(42)
-    df = pd.DataFrame({
-        "age": np.random.randint(13, 45, 300),
-        "sleep_hours": np.random.randint(4, 10, 300),
-        "water_intake_ltr": np.round(np.random.uniform(1.5, 4.0, 300), 1),
-        "stress_level": np.random.choice([0, 1, 2], 300),
-        "skin_type": np.random.choice([0, 1, 2], 300),
-        "diet": np.random.choice([0, 1], 300),
-        "routine": np.random.choice([0, 1], 300),
-    })
-    df["acne_severity"] = (
-        -2.0 * df["water_intake_ltr"] +
-        (7 - df["sleep_hours"]) * 1.5 +
-        df["stress_level"] * 2.5 +
-        (1 - df["diet"]) * 2.0 +
-        (1 - df["routine"]) * 2.0 +
-        np.random.normal(0, 1, len(df)) + 4
-    )
-    df["acne_severity"] = df["acne_severity"].clip(0, 10)
-    return df
+# --- Title Banner ---
+st.markdown("""
+    <h1 style='text-align: center; color: #e91e63;'>
+        ⚡️  *Predictly Health Check* – स्मार्ट लाइफस्टाइल सलाहकार
+    </h1>
+    <h4 style='text-align: center; color: gray;'>Made with ❤️ by Deepali Verma</h4>
+    <hr style='border: 1px solid #e91e63;'>
+""", unsafe_allow_html=True)
+
+# --- Model and configuration ---
+models = {
+    "Acne": "acne_model.pkl",
+    "Hairfall": "hairfall_model.pkl",
+    "Weight Gain": "weight_model.pkl"
+}
+
+condition_factors = {
+    "Acne": [
+        ("Age", (10, 45)),
+        ("Sleep Hours", (4, 10)),
+        ("Water Intake (L/day)", (1, 5)),
+        ("Stress Level (0=Low, 1=Medium, 2=High)", (0, 2)),
+        ("Skin Type (0=Oily, 1=Dry, 2=Combination)", (0, 2)),
+        ("Diet (0=Junk, 1=Healthy)", (0, 1)),
+        ("Routine (0=No, 1=Yes)", (0, 1))
+    ],
+    "Hairfall": [
+        ("Age", (10, 60)),
+        ("Protein Intake (g/day)", (20, 150)),
+        ("Stress Level (0=Low, 1=Medium, 2=High)", (0, 2)),
+        ("Shampoo Frequency/week", (0, 7)),
+        ("Sleep Hours", (4, 10)),
+        ("Pollution Level (0=Low, 1=Medium, 2=High)", (0, 2))
+    ],
+    "Weight Gain": [
+        ("Age", (10, 70)),
+        ("Daily Calorie Intake", (1000, 4000)),
+        ("Physical Activity Level (0=Low, 1=Medium, 2=High)", (0, 2)),
+        ("Sleep Hours", (4, 10)),
+        ("Metabolism Rate (0=Slow, 1=Normal, 2=Fast)", (0, 2))
+    ]
+}
 
 @st.cache_resource
-def train_model(df):
-    X = df.drop("acne_severity", axis=1)
-    y = df["acne_severity"]
-    model = LinearRegression()
-    model.fit(X, y)
-    with open("regression_model.pkl", "wb") as f:
-        pickle.dump(model, f)
-    return model
+def load_model(path):
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
-def load_model():
+def suggest_doctors_nearby():
+    st.subheader("🏥 Nearby Dermatologists or Clinics")
     try:
-        with open("regression_model.pkl", "rb") as f:
-            return pickle.load(f)
-    except:
-        df = fetch_real_data()
-        return train_model(df)
+        location_info = requests.get("https://ipinfo.io").json()
+        city = location_info.get("city", "your area")
+        latlon = location_info.get("loc", "28.61,77.20")
+        st.markdown(f"Showing doctors near **{city}**")
+        query = f"https://www.google.com/maps/search/dermatologist+near+{city}/@{latlon},14z"
+        st.markdown(f"[🔗 Click here to view on Google Maps]({query})", unsafe_allow_html=True)
+    except Exception as e:
+        st.warning(f"Could not fetch location: {e}")
 
-model = load_model()
+# --- UI ---
+condition = st.selectbox("Select Health Issue to Predict:", list(models.keys()))
+model_path = models[condition]
+model = load_model(model_path)
 
+factors = condition_factors[condition]
+user_input = []
 
-def get_air_quality(city="Delhi"):
-    api_key = os.getenv("OPENWEATHERMAP_API_KEY", "YOUR_OPENWEATHERMAP_API_KEY")
-    url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat=28.6139&lon=77.2090&appid={api_key}"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            aqi = data['list'][0]['main']['aqi']
-            return aqi - 1 if aqi <= 3 else 2
-        else:
-            return 1
-    except:
-        return 1
+st.subheader(f"📝 Please fill in the information for {condition} prediction")
 
-st.markdown("""
-    <h1 style='text-align: center; color: #ff4b4b;'>Acne Severity Predictor 🎯</h1>
-""", unsafe_allow_html=True)
+for label, (min_val, max_val) in factors:
+    if max_val <= 2:
+        value = st.selectbox(label, list(range(min_val, max_val + 1)))
+    else:
+        value = st.slider(label, min_val, max_val, int((min_val + max_val) / 2))
+    user_input.append(value)
 
-age = st.slider("Select Age", 13, 45, 20)
-sleep = st.slider("Sleep Hours (per day)", 4, 10, 7)
-water = st.slider("Water Intake (liters/day)", 1.0, 4.0, 2.0, step=0.1)
+input_array = np.array(user_input).reshape(1, -1)
 
-skin = st.selectbox("Skin Type", ["Oily", "Dry", "Combination"])
-diet = st.radio("Diet Type", ["Junk", "Healthy"])
-routine = st.radio("Do you follow a skincare routine?", ["Yes", "No"])
-
-st.write("Fetching live air quality (as a factor for stress level)...")
-stress_level = get_air_quality()
-st.write(f"Detected stress level from pollution data: {['Low', 'Medium', 'High'][stress_level]}")
-
-skin_map = {"Oily": 0, "Dry": 1, "Combination": 2}
-diet_map = {"Junk": 0, "Healthy": 1}
-routine_map = {"No": 0, "Yes": 1}
-
-input_data = np.array([[age, sleep, water,
-                        stress_level,
-                        skin_map[skin],
-                        diet_map[diet],
-                        routine_map[routine]]])
-
-if st.button("Predict Acne Severity"):
-    prediction = model.predict(input_data)[0]
-    st.success(f"Predicted acne severity score (0–10): {prediction:.2f}")
+if st.button("🔍 Predict Severity"):
+    prediction = model.predict(input_array)[0]
+    st.success(f"Predicted {condition} severity score (0–10): {prediction:.2f}")
 
     st.markdown("---")
-    st.subheader("🩺 Doctor's Suggestions")
+    st.subheader("📋 Suggestions")
+    tips = [f"Improve {label.lower()} to reduce severity." for (label, _), val in zip(factors, user_input) if isinstance(val, (int, float)) and val < 5]
+    tips.append("Consult a specialist if score > 7.") if prediction > 7 else tips.append("Maintain current routine.")
 
-    suggestions = []
+    for tip in tips:
+        st.markdown(f"- {tip}")
 
-    if water < 2.5:
-        suggestions.append("- Increase water intake to keep your skin hydrated.")
-    else:
-        suggestions.append("- Your hydration level is good. Keep it up!")
-
-    if sleep < 7:
-        suggestions.append("- Improve sleep quality. Aim for 7–8 hours per night.")
-    else:
-        suggestions.append("- Sleep hours look sufficient.")
-
-    if stress_level > 0:
-        suggestions.append("- Practice relaxation techniques to manage stress levels.")
-
-    if diet_map[diet] == 0:
-        suggestions.append("- Reduce junk food. Prefer a balanced, nutritious diet.")
-    else:
-        suggestions.append("- Your diet appears healthy.")
-
-    if routine_map[routine] == 0:
-        suggestions.append("- Start a consistent skincare routine for better results.")
-    else:
-        suggestions.append("- Skincare routine is in place. Great job!")
-
-    if prediction > 6:
-        suggestions.append("- Severe acne detected. Consider consulting a dermatologist.")
-    elif prediction > 3:
-        suggestions.append("- Moderate acne. Monitor your habits and adjust accordingly.")
-    else:
-        suggestions.append("- Low severity. Keep maintaining your current lifestyle.")
-
-    for s in suggestions:
-        st.markdown(s)
-
-    # Plot user input and prediction visually
     st.markdown("---")
-    st.subheader("📊 Input Summary & Prediction")
-    fig, ax = plt.subplots()
-    feature_names = ["Age", "Sleep", "Water", "Stress", "Skin Type", "Diet", "Routine"]
-    input_values = input_data[0].tolist()
-    bars = ax.barh(feature_names, input_values, color="#ff8080")
-    ax.set_xlabel("Input Values")
+    st.subheader("📊 Input Chart")
+    fig, ax = plt.subplots(figsize=(6, 3))
+    labels = [label for label, _ in factors]
+    ax.barh(labels, user_input, color="#4caf50")
+    ax.set_xlim(left=0)
     st.pyplot(fig)
 
-st.markdown("""
-    <style>
-    .stButton>button {
-        background-color: #ff4b4b;
-        color: white;
-        font-size: 16px;
-        padding: 10px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+    # PDF Report Download
+    from io import BytesIO
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, f"{condition} Prediction Report", ln=True, align='C')
+    pdf.ln(10)
+    for label, value in zip(labels, user_input):
+        pdf.cell(200, 10, f"{label}: {value}", ln=True)
+    pdf.cell(200, 10, f"Predicted Severity: {prediction:.2f}", ln=True)
+    for tip in tips:
+        pdf.cell(200, 10, f"Tip: {tip}", ln=True)
+
+    pdf_data = pdf.output(dest='S').encode('latin1')
+
+    st.download_button(
+        label="⬇️ Download PDF Report",
+        data=pdf_data,
+        file_name=f"{condition.lower()}_report.pdf",
+        mime="application/pdf"
+    )
+
+    # WhatsApp Sharing (link based)
+    message = f"{condition} Severity Report\nScore: {prediction:.2f}\n" + "\n".join(tips)
+    encoded_msg = requests.utils.quote(message)
+    whatsapp_url = f"https://wa.me/?text={encoded_msg}"
+    st.markdown("---")
+    st.subheader("📤 Share on WhatsApp")
+    st.markdown(f"[📲 Click here to share on WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
+
+    st.markdown("---")
+    suggest_doctors_nearby()
